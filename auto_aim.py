@@ -1,44 +1,45 @@
 import cv2
 import numpy as np
-import os
+import pyautogui
 import time
+from cryptography.hazmat.primitives import hashes
 
-# Konfigurasi
-SCREENSHOT_PATH = "/sdcard/screen.png"  # Lokasi screenshot di HP
-TAP_X, TAP_Y = 500, 500  # Koordinat default untuk menembak
+# Konfigurasi auto-aim
+AIM_THRESHOLD = 0.8  # Tingkat kecocokan yang dianggap musuh
+DELAY_BETWEEN_SHOTS = 0.1  # Delay antar tembakan
+HEAD_OFFSET_Y = -20  # Offset ke kepala musuh
 
-# Fungsi untuk mengambil screenshot dari HP ke Termux
+# Fungsi untuk mengambil screenshot
 def capture_screen():
-    os.system(f"adb shell screencap -p {SCREENSHOT_PATH}")
-    os.system("adb pull /sdcard/screen.png screen.png")
+    screenshot = pyautogui.screenshot()
+    return cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
 
-def detect_enemy(image_path):
-    image = cv2.imread(image_path)
-    if image is None:
-        return None
+# Fungsi untuk mendeteksi musuh
+def detect_enemy(frame, template_path="enemy_template.png"):
+    template = cv2.imread(template_path, 0)
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    result = cv2.matchTemplate(gray_frame, template, cv2.TM_CCOEFF_NORMED)
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
     
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    lower_red = np.array([0, 120, 70])
-    upper_red = np.array([10, 255, 255])
-    mask = cv2.inRange(hsv, lower_red, upper_red)
-    
-    contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    if contours:
-        c = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(c)
-        return (x + w // 2, y + h // 5)  # Kembaliin koordinat kepala musuh
+    if max_val >= AIM_THRESHOLD:
+        head_pos = (max_loc[0], max_loc[1] + HEAD_OFFSET_Y)  # Sesuaikan ke kepala
+        return head_pos
     return None
 
-def auto_aim():
-    capture_screen()
-    enemy_pos = detect_enemy("screen.png")
-    if enemy_pos:
-        x, y = enemy_pos
-        print(f"Menembak di posisi: {x}, {y}")
-        os.system(f"adb shell input tap {x} {y}")
-    else:
-        print("Musuh tidak ditemukan.")
+# Fungsi untuk menempelkan aim ke kepala musuh saat menembak
+def aim_and_shoot(target_pos):
+    screen_width, screen_height = pyautogui.size()
+    x, y = target_pos
+    pyautogui.moveTo(x, y, duration=0.02)  # Lebih cepat menuju kepala
+    pyautogui.click()  # Tembak
+    time.sleep(DELAY_BETWEEN_SHOTS)
 
+# Loop utama
 while True:
-    auto_aim()
-    time.sleep(0.1)  # Loop setiap 100ms
+    frame = capture_screen()
+    target = detect_enemy(frame)
+    
+    if target and pyautogui.mouseDown():  # Menempelkan aim saat menembak
+        aim_and_shoot(target)
+    
+    time.sleep(0.05)  # Delay kecil untuk menghindari penggunaan CPU tinggi
